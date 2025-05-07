@@ -1,0 +1,117 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+local Leaderstats = LocalPlayer:WaitForChild("leaderstats")
+local Backpack = LocalPlayer:WaitForChild("Backpack")
+local ShecklesCount = Leaderstats:WaitForChild("Sheckles")
+local GameEvents = ReplicatedStorage:WaitForChild("GameEvents")
+
+local autoCollect = true
+local SellThreshold = 3 -- Adjust the threshold for when to sell
+local IsSelling = false
+
+-- Function to get the player's owned plot
+local function getOwnedPlot()
+    for _, plot in pairs(workspace.Farm:GetChildren()) do
+        local important = plot:FindFirstChild("Important") or plot:FindFirstChild("Importanert")
+        if important then
+            local data = important:FindFirstChild("Data")
+            if data and data:FindFirstChild("Owner") and data.Owner.Value == LocalPlayer.Name then
+                return plot
+            end
+        end
+    end
+    return nil
+end
+
+-- Function to sell inventory when threshold is met
+local function SellInventory()
+    local Character = LocalPlayer.Character
+    if not Character or IsSelling then return end
+    IsSelling = true
+
+    local Previous = Character:GetPivot()
+    local PreviousSheckles = ShecklesCount.Value
+
+    -- Move to the selling area (custom coordinates)
+    Character:PivotTo(CFrame.new(62, 4, -26))
+
+    while task.wait(0.5) do
+        if ShecklesCount.Value ~= PreviousSheckles then
+            break
+        end
+        GameEvents.Sell_Inventory:FireServer()
+    end
+
+    -- Return to the original position
+    Character:PivotTo(Previous)
+    task.wait(0.2)
+    IsSelling = false
+end
+
+-- Function to collect crops from the player's inventory
+local function GetInvCrops()
+    local Crops = {}
+    local function CollectFrom(parent)
+        for _, item in parent:GetChildren() do
+            if item:FindFirstChild("Item_String") then
+                table.insert(Crops, item)
+            end
+        end
+    end
+
+    -- Collect from both Backpack and Character
+    CollectFrom(Backpack)
+    CollectFrom(LocalPlayer.Character)
+
+    return Crops
+end
+
+-- Main loop for collecting crops from plot and activating prompts
+task.spawn(function()
+    while task.wait(0.1) do
+        if autoCollect then
+            local plot = getOwnedPlot()
+            if plot then
+                local farm = plot:FindFirstChild("Important"):FindFirstChild("Plants_Physical")
+                if farm then
+                    for _, prompt in ipairs(farm:GetDescendants()) do
+                        if prompt:IsA("ProximityPrompt") then
+                            local playerRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            if playerRoot then
+                                local dist = (playerRoot.Position - prompt.Parent.Position).Magnitude
+                                if dist <= 20 then
+                                    -- Modify prompt settings to ensure it's activated within range
+                                    prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+                                    prompt.MaxActivationDistance = 100
+                                    prompt.RequiresLineOfSight = false
+                                    prompt.Enabled = true
+                                    fireproximityprompt(prompt, 1, true)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- Main loop for selling inventory when crop count meets the threshold
+task.spawn(function()
+    while task.wait(2) do
+        local Crops = GetInvCrops()
+        if #Crops >= SellThreshold then
+            SellInventory()
+        end
+    end
+end)
+
+-- Trigger selling when a crop is added to the backpack
+Backpack.ChildAdded:Connect(function()
+    local Crops = GetInvCrops()
+    if #Crops >= SellThreshold then
+        SellInventory()
+    end
+end)
